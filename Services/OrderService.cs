@@ -1,3 +1,4 @@
+using MassTransit;
 using Savana.Order.API.Dtos;
 using Savana.Order.API.Entities;
 using Savana.Order.API.Extensions;
@@ -5,6 +6,7 @@ using Savana.Order.API.Interfaces;
 using Savana.Order.API.Requests;
 using Savana.Order.API.Requests.Params;
 using Savana.Order.API.Specification;
+using Treasures.Common.Events;
 using Treasures.Common.Helpers;
 using Treasures.Common.Interfaces;
 
@@ -14,11 +16,18 @@ public class OrderService : IOrderService {
     private readonly IUnitOfWork _unitOfWork;
     private readonly IProductService _productService;
     private readonly IVoucherService _voucherService;
+    private readonly ILogger<OrderService> _logger;
+    private readonly IPublishEndpoint _pub;
 
-    public OrderService(IUnitOfWork unitOfWork, IProductService productService, IVoucherService voucherService) {
+    public OrderService(
+        IUnitOfWork unitOfWork, IProductService productService, IVoucherService voucherService, 
+        ILogger<OrderService> logger, IPublishEndpoint publisher
+    ) {
         _unitOfWork = unitOfWork;
         _productService = productService;
         _voucherService = voucherService;
+        _logger = logger;
+        _pub = publisher;
     }
 
     public async Task<OrderDto?> CreateOrder(
@@ -27,7 +36,11 @@ public class OrderService : IOrderService {
         var orderItems = new List<OrderItem>();
         foreach (var item in orderReq.Items) {
             var existingProd = await _productService.GetProductById(item.ProductId!);
-            if (existingProd == null) continue;
+            if (existingProd == null) {
+                _logger.LogWarning("Product with id {Id} not found", item.ProductId);
+                continue;
+            }
+
             if (existingProd.Stock > item.Quantity) {
                 var price = existingProd.GetFinalPrice();
                 if (DateTime.UtcNow > existingProd.PromoExpiry) {
@@ -67,7 +80,16 @@ public class OrderService : IOrderService {
         voucher.UseCount++;
         await _voucherService.UpdateVoucherCount(voucher);
 
-        return result < 1 ? null : res.MapOrderToDto();
+        if (result >= 1) {
+            _logger.LogInformation("Order with orderId {OrderId} for buyer with id {BuyerId} created",
+                res.Id, orderReq.BuyerId
+            );
+            await _pub.Publish(new BasketEvent(res.BuyerId!));
+            return res.MapOrderToDto();
+        }
+
+        _logger.LogError("Unable to create order for buyer with id {BuyerId}", orderReq.BuyerId);
+        return null;
     }
 
     public async Task<PagedList<OrderEntity>> GetOrders(OrderParams orderParams) {

@@ -12,7 +12,12 @@ namespace Savana.Order.API.Services;
 
 public class VoucherService : IVoucherService {
     private readonly IUnitOfWork _unitOfWork;
-    public VoucherService(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+    private readonly ILogger<VoucherService> _logger;
+
+    public VoucherService(IUnitOfWork unitOfWork, ILogger<VoucherService> logger) {
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
 
     public async Task<PagedList<VoucherEntity>> GetVouchers(VoucherParams vParams) {
         var spec = new VoucherSpecification(vParams);
@@ -40,7 +45,14 @@ public class VoucherService : IVoucherService {
 
         var res = _unitOfWork.Repository<VoucherEntity>().AddAsync(newVoucher);
         var result = await _unitOfWork.Complete();
-        return result < 1 ? null : res.MapVoucherToDto();
+
+        if (result >= 1) {
+            _logger.LogInformation("Voucher with title {Title} created", res.Title);
+            return res.MapVoucherToDto();
+        }
+
+        _logger.LogError("Unable to create voucher with title {Title}", voucherReq.Title);
+        return null;
     }
 
     public async Task<VoucherDto?> UpdateVoucher(VoucherEntity existing, VoucherReq voucherReq, string updatedBy) {
@@ -59,7 +71,13 @@ public class VoucherService : IVoucherService {
     private async Task<VoucherDto?> SaveVoucherChanges(VoucherEntity existing) {
         var res = _unitOfWork.Repository<VoucherEntity>().UpdateAsync(existing);
         var result = await _unitOfWork.Complete();
-        return result < 1 ? null : res.MapVoucherToDto();
+        if (result >= 1) {
+            _logger.LogInformation("Voucher with title {Title} updated", res.Title);
+            return res.MapVoucherToDto();
+        }
+
+        _logger.LogError("Unable to update voucher with title {Title}", existing.Title);
+        return null;
     }
 
     private static DateTime GetExpiryTime(ExpiresAfter? expiresAfter) {
