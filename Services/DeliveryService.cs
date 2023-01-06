@@ -12,7 +12,12 @@ namespace Savana.Order.API.Services;
 
 public class DeliveryService : IDeliveryService {
     private readonly IUnitOfWork _unitOfWork;
-    public DeliveryService(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+    private readonly ILogger<DeliveryService> _logger;
+
+    public DeliveryService(IUnitOfWork unitOfWork, ILogger<DeliveryService> logger) {
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
 
     public async Task<PagedList<DeliveryEntity>> GetDeliveries(DeliveryParams delParams) {
         var spec = new DeliverySpecification(delParams);
@@ -27,7 +32,14 @@ public class DeliveryService : IDeliveryService {
 
         var res = _unitOfWork.Repository<DeliveryEntity>().AddAsync(newDelivery);
         var result = await _unitOfWork.Complete();
-        return result < 1 ? null : res.MapDeliveryToDto();
+
+        if (result >= 1) {
+            _logger.LogInformation("Delivery method with title {Title} created", res.Title);
+            return res.MapDeliveryToDto();
+        }
+
+        _logger.LogError("Unable to create delivery method with title {Title}", deliveryReq.Title);
+        return null;
     }
 
     public async Task<DeliveryEntity?> GetDeliveryMethod(string methodId) => await _unitOfWork
@@ -53,6 +65,13 @@ public class DeliveryService : IDeliveryService {
     private async Task<DeliveryDto?> SaveDeliveryMethodChanges(DeliveryEntity existing) {
         var res = _unitOfWork.Repository<DeliveryEntity>().UpdateAsync(existing);
         var result = await _unitOfWork.Complete();
-        return result < 1 ? null : res.MapDeliveryToDto();
+
+        if (result >= 1) {
+            _logger.LogInformation("Delivery with title {Title} updated", res.Title);
+            return res.MapDeliveryToDto();
+        }
+
+        _logger.LogError("Unable to update delivery with title {Title}", existing.Title);
+        return null;
     }
 }

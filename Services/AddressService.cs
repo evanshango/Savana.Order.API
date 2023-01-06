@@ -11,7 +11,12 @@ namespace Savana.Order.API.Services;
 
 public class AddressService : IAddressService {
     private readonly IUnitOfWork _unitOfWork;
-    public AddressService(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+    private readonly ILogger<AddressService> _logger;
+
+    public AddressService(IUnitOfWork unitOfWork, ILogger<AddressService> logger) {
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
 
     public async Task<AddressDto?> GetUserAddress(AddressParams addressParams) {
         var addressSpec = new AddressSpecification(addressParams);
@@ -44,7 +49,14 @@ public class AddressService : IAddressService {
 
         var res = _unitOfWork.Repository<AddressEntity>().AddAsync(newAddress);
         var result = await _unitOfWork.Complete();
-        return result < 1 ? null : res.MapAddressToDto();
+
+        if (result >= 1) {
+            _logger.LogInformation("Address for user with email {Email} created", res.CreatedBy);
+            return res.MapAddressToDto();
+        }
+
+        _logger.LogError("Unable to create address for user with email {Email}", addressReq.Email);
+        return null;
     }
 
     public async Task<AddressEntity?> GetAddress(string createdBy) => await FetchUserAddress(createdBy);
@@ -61,12 +73,23 @@ public class AddressService : IAddressService {
 
     private async Task<AddressEntity?> FetchUserAddress(string email) {
         var addressSpec = new AddressSpecification(email);
-        return await _unitOfWork.Repository<AddressEntity>().GetEntityWithSpec(addressSpec);
+        var address = await _unitOfWork.Repository<AddressEntity>().GetEntityWithSpec(addressSpec);
+
+        if (address != null) return address;
+        _logger.LogWarning("Address for user with email {Email} not found", email);
+        return null;
     }
 
     private async Task<AddressDto?> SaveAddressChanges(AddressEntity existing) {
         var res = _unitOfWork.Repository<AddressEntity>().UpdateAsync(existing);
         var result = await _unitOfWork.Complete();
-        return result < 1 ? null : res.MapAddressToDto();
+
+        if (result >= 1) {
+            _logger.LogInformation("Address for user with email {Email} updated", res.CreatedBy);
+            return res.MapAddressToDto();
+        }
+
+        _logger.LogError("Unable to update address for user with email {Email}", existing.CreatedBy);
+        return null;
     }
 }
